@@ -1,0 +1,77 @@
+
+
+name: Monitor repository and notify
+on:
+  schedule:
+    - cron: '*/1 * * * *'
+  workflow_dispatch:
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout code
+      uses: actions/checkout@v4
+    - name: monitor repo release
+      uses: actions/github-script@v7
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const configPath = path.join(process.env.GITHUB_WORKSPACE, 'repos.json');
+          const repos = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+          for (const repo of repos){
+              const releaseResponse = await github.rest.repos.listReleases({
+                owner: repo.owner,
+                repo : repo.name,
+                per_page: 1
+              });
+              if (releaseResponse.data.length === 0) {
+                console.log('No releases found');
+                return;
+              }
+              const latestRelease = releaseResponse.data[0];
+              const releaseDate = new Date(latestRelease.published_at);
+              const now = new Date();
+              const timeDiff = now.getTime() - releaseDate.getTime();
+              const hourDiff = timeDiff / (1000 * 60 * 60)
+
+              if (hourDiff <= 24) {
+                const message = `
+                  🎉 *新版本发布！*
+                  📦 **仓库**: ${repo.owner}/${repo.name}
+                  🏷️ **版本**: ${latestRelease.tag_name}
+                  📝 **标题**: ${latestRelease.name}
+                  📅 **发布时间**: ${releaseDate.toLocaleString('zh-CN')}
+                  🔗 **链接**: ${latestRelease.html_url}
+                `.trim();
+
+                const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    chat_id: TELEGRAM_CHAT_ID,
+                    text: message,
+                    parse_mode: 'Markdown',
+                    disable_web_page_preview: false
+                  })
+                })
+
+                if (response.ok) {
+                  console.log(`Notification sent for release ${latestReleast.tag_name}`);
+                } else {
+                  throw new Error (`Telegram API error: ${response.statusText}`);
+                }
+              } else {
+                console.log(`No releases in the last 24 Hours.`)
+              }          
+            }
+
+          
+          
+    
+
